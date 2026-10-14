@@ -1,0 +1,1159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scope Trace Digitizer</title>
+<style>
+/* Layout: a bench tool with two modes behind one switch. Each mode is a single working column: intake strip, results, export. */
+:root {
+  --ground: #e9ecef; --panel: #fbfbfa; --panel-2: #f1f3f5; --ink: #16202b; --ink-2: #465361; --ink-3: #6f7a86;
+  --line: #d3d8de; --line-2: #e3e7eb; --accent: #b4500c; --accent-ink: #ffffff; --accent-wash: #fbeadb;
+  --good: #0b6e2e; --good-bg: #e1f2e6; --warn: #855600; --warn-bg: #fcefcc; --bad: #b3261e; --bad-bg: #fbe4e2;
+  --screen: #0b0e11; --focus: #1f6feb;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "DIN Alternate", "Bahnschrift", "Avenir Next Condensed", "Roboto Condensed", system-ui, sans-serif;
+  --font-data: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1317; --panel: #171c22; --panel-2: #1e252c; --ink: #e7ecf1; --ink-2: #b3bdc8; --ink-3: #8a96a3;
+    --line: #2f3944; --line-2: #242c35; --accent: #f08a34; --accent-ink: #1c1005; --accent-wash: #382312;
+    --good: #62d28d; --good-bg: #12301f; --warn: #f0c04a; --warn-bg: #3a2e0c; --bad: #ff8b82; --bad-bg: #3d1614;
+    --screen: #06080a; --focus: #6ea8ff; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0f1317; --panel: #171c22; --panel-2: #1e252c; --ink: #e7ecf1; --ink-2: #b3bdc8; --ink-3: #8a96a3;
+  --line: #2f3944; --line-2: #242c35; --accent: #f08a34; --accent-ink: #1c1005; --accent-wash: #382312;
+  --good: #62d28d; --good-bg: #12301f; --warn: #f0c04a; --warn-bg: #3a2e0c; --bad: #ff8b82; --bad-bg: #3d1614;
+  --screen: #06080a; --focus: #6ea8ff; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.45 var(--font-ui); }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; }
+.grow { flex: 1 1 auto; }
+
+.top { background: var(--panel); border-bottom: 1px solid var(--line); }
+.top .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding-block: 14px; }
+.brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+.brand svg { width: 30px; height: 30px; color: var(--accent); flex: none; }
+h1 { margin: 0; font: 600 22px/1.1 var(--font-display); letter-spacing: 0.02em; }
+.modes { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 3px; background: var(--panel-2); }
+.modes button { border: 0; background: none; padding: 7px 16px; border-radius: 6px; cursor: pointer; color: var(--ink-2); font-weight: 500; }
+.modes button[aria-selected="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+
+main.wrap { padding-block: 20px 48px; display: flex; flex-direction: column; gap: 16px; }
+.view { display: flex; flex-direction: column; gap: 14px; }
+.intake { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 18px 20px; background: var(--panel);
+  border: 1.5px dashed var(--line); border-radius: 10px; }
+.intake.over { border-color: var(--accent); background: var(--accent-wash); }
+.intake-text { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.intake-text strong { font: 600 17px/1.25 var(--font-display); letter-spacing: 0.01em; }
+.intake-text span { color: var(--ink-2); }
+.intake-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.btn { display: inline-block; border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 7px 14px; cursor: pointer;
+  font-weight: 500; text-decoration: none; color: var(--ink); }
+.btn:hover { border-color: var(--ink-3); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.small { padding: 4px 10px; font-size: 13px; }
+.btn[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--panel); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.status-line { color: var(--ink-2); font-size: 13px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 8px; }
+.dot.off { background: var(--bad); }
+.dot.warn { background: var(--warn); }
+
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.counts { font: 600 15px/1.2 var(--font-display); letter-spacing: 0.02em; }
+.counts span { color: var(--ink-2); font-weight: 400; }
+.chk { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); cursor: pointer; }
+.chk input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+.export { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.opt { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-2); min-width: 0; }
+.opt select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-size: 13.5px; color: var(--ink); max-width: 100%; }
+.preview { flex: 1 1 100%; margin: 0; padding: 8px 10px; background: var(--panel-2); border-radius: 6px; font: 12.5px/1.5 var(--font-data); color: var(--ink-2); overflow-x: auto; white-space: pre; }
+
+.cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card[data-status="review"] { border-left: 4px solid var(--warn); }
+.card[data-status="fail"] { border-left: 4px solid var(--bad); }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; }
+.fname { font: 500 13.5px/1.3 var(--font-data); overflow-wrap: anywhere; min-width: 0; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 9px 2px 7px; white-space: nowrap; }
+.chip.ok { background: var(--good-bg); color: var(--good); }
+.chip.review { background: var(--warn-bg); color: var(--warn); }
+.chip.fail { background: var(--bad-bg); color: var(--bad); }
+.chip.wait { background: var(--panel-2); color: var(--ink-2); }
+.strip { background: var(--screen); border-radius: 6px; padding: 6px 8px; overflow-x: auto; }
+.strip img { display: block; height: 19px; width: 740px; max-width: none; }
+.cap { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); }
+.fields { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.field .key { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+.field input { width: 118px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font: 13.5px var(--font-data); }
+.field input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-bg); }
+.field .val { font: 13.5px var(--font-data); padding: 6px 0; }
+.sw { width: 14px; height: 3px; border-radius: 2px; flex: none; display: inline-block; }
+.checks, .notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.checks { flex-direction: row; flex-wrap: wrap; gap: 4px 16px; color: var(--ink-2); }
+.checks b { font-weight: 600; color: var(--ink); }
+.checks .good { color: var(--good); font-weight: 600; }
+.checks .bad { color: var(--bad); font-weight: 600; }
+.notes li { color: var(--warn); padding-left: 16px; position: relative; }
+.notes li::before { content: "!"; position: absolute; left: 3px; font-weight: 700; }
+.card[data-status="fail"] .notes li { color: var(--bad); }
+.remarks { list-style: none; margin: 0; padding: 0; font-size: 13px; color: var(--ink-2); }
+
+.detail { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line-2); padding-top: 10px; min-width: 0; }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.seg { display: inline-flex; }
+.seg .btn { border-radius: 0; margin-left: -1px; }
+.seg .btn:first-child { border-radius: 7px 0 0 7px; margin-left: 0; }
+.seg .btn:last-child { border-radius: 0 7px 7px 0; }
+.shot { background: var(--screen); border-radius: 6px; padding: 6px; overflow-x: auto; }
+.shot img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 16px; margin: 0; font-size: 13px; }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; font-family: var(--font-data); overflow-wrap: anywhere; min-width: 0; }
+.fine { color: var(--ink-2); font-size: 13px; max-width: 76ch; margin: 0; }
+.empty { padding: 28px 20px; text-align: center; color: var(--ink-2); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+
+.chart { position: relative; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.chart canvas { display: block; width: 100%; touch-action: pan-y; cursor: crosshair; }
+.tip { position: absolute; top: 0; left: 0; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16); font-size: 12.5px; white-space: nowrap; z-index: 2; }
+.tip-x { color: var(--ink-2); margin-bottom: 3px; font-variant-numeric: tabular-nums; }
+.tip-row { display: flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; }
+.tip-row b { font-weight: 600; }
+.tip-row span { color: var(--ink-2); }
+.tablewrap { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font: 12.5px var(--font-data); font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 4px 12px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--panel-2); font-weight: 600; }
+td.idx, th.idx { color: var(--ink-3); text-align: left; width: 1%; }
+
+.gwrap { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.glist { flex: 1 1 200px; max-width: 260px; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+.glist h2 { margin: 4px 6px 8px; font: 600 13px/1.2 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+.glist ul { list-style: none; margin: 0; padding: 0; max-height: 520px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.glist button { width: 100%; text-align: left; border: 0; background: none; border-radius: 6px; padding: 6px 8px; cursor: pointer; font: 13px/1.3 var(--font-data); overflow-wrap: anywhere; }
+.glist button:hover { background: var(--panel-2); }
+.glist button[aria-current="true"] { background: var(--accent-wash); box-shadow: inset 3px 0 0 var(--accent); }
+.gmain { flex: 3 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.gmain h2 { margin: 0; font: 600 16px/1.2 var(--font-data); overflow-wrap: anywhere; }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--panel);
+  padding: 9px 16px; border-radius: 8px; font-size: 13.5px; max-width: calc(100% - 32px); z-index: 10; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); }
+@media (max-width: 640px) {
+  .wrap { padding-inline: 16px; }
+  .glist { max-width: none; flex-basis: 100%; }
+  .glist ul { max-height: 160px; }
+  .field input { width: 104px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2.5" y="4.5" width="27" height="23" rx="3.5"></rect>
+        <path d="M6 20h4l2.5-9 3 9h3.5l2.5-9 3 9h1.5"></path>
+      </svg>
+      <h1>Scope Trace Digitizer</h1>
+    </div>
+    <nav class="modes" role="tablist" aria-label="Tool">
+      <button type="button" role="tab" id="tab-convert" aria-selected="true" aria-controls="view-convert">Images to x,y</button>
+      <button type="button" role="tab" id="tab-graph" aria-selected="false" aria-controls="view-graph">CSV to graph</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="view" id="view-convert" role="tabpanel" aria-labelledby="tab-convert">
+    <div class="intake" id="drop-img">
+      <div class="intake-text">
+        <strong>Drop scope screenshots or a whole folder here</strong>
+        <span>Keysight DSO-X and MSO-X 3000T screen captures, PNG or JPG. They are read on this computer and never uploaded.</span>
+      </div>
+      <div class="intake-actions">
+        <button type="button" class="btn" id="pick-files">Choose images</button>
+        <button type="button" class="btn" id="pick-folder">Choose folder</button>
+        <input type="file" id="in-files" accept="image/*" multiple hidden>
+        <input type="file" id="in-folder" webkitdirectory multiple hidden>
+      </div>
+    </div>
+    <div class="status-line" id="engine" aria-live="polite"></div>
+
+    <div class="bar">
+      <div class="counts" id="counts"></div>
+      <label class="chk" for="only-review"><input type="checkbox" id="only-review"> Show only images to review</label>
+      <span class="grow"></span>
+      <button type="button" class="btn small" id="clear-all">Clear all</button>
+    </div>
+
+    <ol class="cards" id="cards"></ol>
+    <div class="empty" id="no-cards">No images yet. Drop some screenshots above. Each one gets a card here that you can open to see its
+      overlay, graph and points before downloading anything.</div>
+
+    <div class="export" id="export">
+      <label class="opt" for="fmt-coords">x and y are
+        <select id="fmt-coords"><option value="units">Seconds and volts</option><option value="pixels">Pixel positions on the grid</option></select></label>
+      <label class="opt" for="fmt-columns">Columns
+        <select id="fmt-columns"><option value="xy">x, y only</option><option value="full">x, y, line bottom and top, flag</option></select></label>
+      <label class="opt" for="fmt-info">Scope readouts in each file
+        <select id="fmt-info"><option value="none">Not included (they are in summary.csv)</option><option value="below">Under the points</option><option value="above">Above the points</option></select></label>
+      <label class="chk" for="zip-check"><input type="checkbox" id="zip-check"> Add check pictures</label>
+      <label class="chk" for="zip-graphs"><input type="checkbox" id="zip-graphs"> Add graph pictures</label>
+      <span class="grow"></span>
+      <button type="button" class="btn primary" id="dl-zip">Download all (.zip)</button>
+      <pre class="preview" id="preview" aria-label="How each file will look"></pre>
+    </div>
+    <p class="fine">A screenshot holds 640 points across the grid, so each trace has 640 x,y rows. One row is 1/64 of a time division and one
+      pixel is 1/50 of a vertical division. y is the centre of the line.</p>
+  </section>
+
+  <section class="view" id="view-graph" role="tabpanel" aria-labelledby="tab-graph" hidden>
+    <div class="intake" id="drop-csv">
+      <div class="intake-text">
+        <strong>Drop CSV files here</strong>
+        <span>Files from this tool, files saved by the scope itself, or any table whose first column is x.</span>
+      </div>
+      <div class="intake-actions">
+        <button type="button" class="btn" id="pick-csv">Choose CSV files</button>
+        <input type="file" id="in-csv" accept=".csv,.txt,.tsv,text/csv" multiple hidden>
+      </div>
+    </div>
+    <div class="empty" id="gempty">No CSV files yet. Drop some above to graph them. Converted screenshots have their own graph inside each card.</div>
+    <div class="gwrap" id="gwrap" hidden>
+      <aside class="glist"><h2 id="glist-title">Graphs</h2><ul id="glist"></ul></aside>
+      <div class="gmain">
+        <h2 id="gtitle"></h2>
+        <div id="gtools"></div>
+        <div class="chart" id="gchart"></div>
+        <p class="fine">Drag across the graph to zoom in. Double-click to zoom back out. With the graph focused, the arrow keys step the readout.</p>
+        <div class="tools">
+          <button type="button" class="btn small" id="g-table" aria-pressed="false">Show points</button>
+          <button type="button" class="btn small" id="g-all">Save all graphs as PNG (.zip)</button>
+        </div>
+        <div class="tablewrap" id="gtable" hidden></div>
+      </div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // Chart colours follow the scope's channel colours, stepped so they read on each surface.
+  const PAL = {
+    light: { surface: '#fcfcfb', ink: '#0b0b0b', ink2: '#52514e', muted: '#6f6e69', grid: '#e1e0d9', axis: '#c3c2b7',
+      yellow: '#eda100', green: '#008300', blue: '#2a78d6', pink: '#e87ba4', purple: '#4a3aa7',
+      slots: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'] },
+    dark: { surface: '#1a1a19', ink: '#ffffff', ink2: '#c3c2b7', muted: '#a09f98', grid: '#2c2c2a', axis: '#4a4a46',
+      yellow: '#c98500', green: '#008300', blue: '#3987e5', pink: '#d55181', purple: '#9085e9',
+      slots: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'] }
+  };
+  const S = { cards: [], queue: [], busy: false, mode: 'convert', csvGroups: [], currentId: null, showTable: false,
+    fmt: { coords: 'units', columns: 'xy', info: 'none' }, textReader: null, offline: false };
+
+  const $ = (s, r) => (r || document).querySelector(s);
+  function h(tag, attrs) {
+    const e = document.createElement(tag);
+    for (const k in attrs || {}) {
+      const v = attrs[k];
+      if (v == null || v === false) continue;
+      if (k === 'class') e.className = v;
+      else if (k === 'text') e.textContent = v;
+      else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), v);
+      else e.setAttribute(k, v === true ? '' : v);
+    }
+    for (let i = 2; i < arguments.length; i++) {
+      for (const kid of [].concat(arguments[i])) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    }
+    return e;
+  }
+  const pal = () => {
+    const t = document.documentElement.getAttribute('data-theme');
+    return (t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches) ? PAL.dark : PAL.light;
+  };
+  let toastTimer = 0;
+  function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 5000); }
+  function saveBlob(blob, name) {
+    const a = h('a', { href: URL.createObjectURL(blob), download: name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+  const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
+  const isImage = f => /^image\//.test(f.type) || /\.(png|jpe?g|bmp|gif|tiff?|webp)$/i.test(f.name);
+  const isCsv = f => /\.(csv|tsv|txt)$/i.test(f.name) || /csv/.test(f.type);
+  const stem = name => name.replace(/\.[^.]+$/, '');
+  const fmtQuery = () => 'coords=' + S.fmt.coords + '&columns=' + S.fmt.columns + '&info=' + S.fmt.info;
+
+  /* ---------- numbers and CSV ---------- */
+
+  function fmtSI(value, unit, digits) {
+    if (value == null || !isFinite(value)) return '';
+    if (value === 0 || !unit) return String(Number(value.toPrecision(digits || 5))) + (unit ? ' ' + unit : '');
+    const e = Math.max(-12, Math.min(9, Math.floor(Math.log10(Math.abs(value)) / 3 + 1e-9) * 3));
+    const pre = { '-12': 'p', '-9': 'n', '-6': 'µ', '-3': 'm', '0': '', '3': 'k', '6': 'M', '9': 'G' }[e];
+    return Number((value / Math.pow(10, e)).toPrecision(digits || 5)) + ' ' + pre + unit;
+  }
+  function niceTicks(lo, hi, n) {
+    const span = hi - lo;
+    if (!(span > 0)) return { ticks: [lo], step: 1 };
+    const raw = span / Math.max(1, n), mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+    const step = (r < 1.5 ? 1 : r < 3 ? 2 : r < 7 ? 5 : 10) * mag, ticks = [];
+    for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-9; v += step) ticks.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+    return { ticks, step };
+  }
+  function unitScale(maxAbs, unit) {
+    if (!unit || !(maxAbs > 0)) return { f: 1, label: unit || '' };
+    const e = Math.max(-12, Math.min(9, Math.floor(Math.log10(maxAbs) / 3 + 1e-9) * 3));
+    return { f: Math.pow(10, e), label: { '-12': 'p', '-9': 'n', '-6': 'µ', '-3': 'm', '0': '', '3': 'k', '6': 'M', '9': 'G' }[e] + unit };
+  }
+  function splitLine(line, delim) {
+    const out = []; let cur = '', q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (q) { if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+      else if (c === '"') q = true;
+      else if (c === delim) { out.push(cur); cur = ''; }
+      else cur += c;
+    }
+    out.push(cur);
+    return out;
+  }
+  // Any CSV: "#" lines are skipped, the last text row above the numbers names the columns,
+  // and a unit may follow a name in brackets or sit in a second header row (the scope's own CSV).
+  function parseCsv(text) {
+    const body = String(text).replace(/^﻿/, '').split(/\r\n|\n|\r/).filter(l => l.trim() && !/^\s*#/.test(l));
+    const sample = body.slice(0, 30);
+    const delim = sample.every(l => l.includes('\t')) ? '\t' : sample.every(l => l.includes(';')) ? ';' : ',';
+    const toNum = s => { s = s.trim(); if (delim === ';') s = s.replace(',', '.'); return s === '' ? NaN : Number(s); };
+    const rows = body.map(l => splitLine(l, delim));
+    const start = rows.findIndex(r => r.some(c => c.trim()) && r.every(c => !c.trim() || isFinite(toNum(c))));
+    if (start < 0) return [];
+    const heads = rows.slice(0, start), unitWord = /^(second|volt|amp|hertz|s|v|a|hz|ms|mv|us)s?$/i;
+    let names = heads.length ? heads[heads.length - 1] : [], units = [];
+    if (heads.length >= 2 && names.every(c => !c.trim() || unitWord.test(c.trim()))) { units = names; names = heads[heads.length - 2]; }
+    const cols = [];
+    for (let j = 0; j < rows[start].length; j++) {
+      let name = (names[j] || '').trim(), unit = (units[j] || '').trim();
+      const m = name.match(/^(.*?)\s*\(([^)]+)\)$/);
+      if (m) { name = m[1].trim(); unit = m[2]; }
+      unit = { second: 's', seconds: 's', sec: 's', volt: 'V', volts: 'V', v: 'V', amp: 'A', amps: 'A' }[unit.toLowerCase()] || unit;
+      const values = new Float64Array(rows.length - start);
+      for (let i = start; i < rows.length; i++) values[i - start] = rows[i][j] == null ? NaN : toNum(rows[i][j]);
+      cols.push({ name: name || 'column ' + (j + 1), unit, values });
+    }
+    return cols;
+  }
+  let crcTable = null;
+  function crc32(u8) {
+    if (!crcTable) { crcTable = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; crcTable[n] = c >>> 0; } }
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < u8.length; i++) c = crcTable[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  // files: [{name, data: Uint8Array}] -> parts for a Blob (stored, no compression)
+  function zipStore(files) {
+    const enc = new TextEncoder(), d = new Date(), parts = [], central = [];
+    const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    let offset = 0;
+    for (const f of files) {
+      const name = enc.encode(f.name), crc = crc32(f.data), size = f.data.length;
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+      lh.setUint16(10, time, true); lh.setUint16(12, date, true); lh.setUint32(14, crc, true); lh.setUint32(18, size, true); lh.setUint32(22, size, true);
+      lh.setUint16(26, name.length, true);
+      parts.push(new Uint8Array(lh.buffer), name, f.data);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true);
+      ch.setUint16(12, time, true); ch.setUint16(14, date, true); ch.setUint32(16, crc, true); ch.setUint32(20, size, true); ch.setUint32(24, size, true);
+      ch.setUint16(28, name.length, true); ch.setUint32(42, offset, true);
+      central.push(new Uint8Array(ch.buffer), name);
+      offset += 30 + name.length + size;
+    }
+    let csize = 0;
+    for (const c of central) csize += c.length;
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, csize, true); end.setUint32(16, offset, true);
+    return parts.concat(central, [new Uint8Array(end.buffer)]);
+  }
+
+  /* ---------- the Python engine: behind a local server on a Mac, or inside this browser ---------- */
+
+  const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
+  const OCR_SRC = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+  const ENGINE = { mode: null, state: 'starting', error: '', handle: null, ready: null };
+  const OCR = { state: 'idle', worker: null, ready: Promise.resolve(), error: '' };
+
+  function loadScript(src) {
+    return new Promise((res, rej) => { const el = h('script', { src }); el.onload = res; el.onerror = () => rej(new Error('could not download ' + src.split('/').pop())); document.head.append(el); });
+  }
+  async function startEngine() {
+    // A local Python program answers "/api" requests. A plain web host does not, and then Python runs right here.
+    try {
+      const r = await fetch('/api/shots', { cache: 'no-store' });
+      if (r.ok && (r.headers.get('Content-Type') || '').includes('json')) { ENGINE.mode = 'server'; ENGINE.state = 'ready'; showEngine(); return; }
+    } catch (e) { /* no server: fall through */ }
+    ENGINE.mode = 'browser'; showEngine();
+    try {
+      await loadScript(PYODIDE + 'pyodide.js');
+      const py = await window.loadPyodide({ indexURL: PYODIDE });
+      await py.loadPackage(['numpy', 'pillow']);
+      for (const file of ['scope_digitizer.py', 'scope_api.py']) {
+        const r = await fetch(file, { cache: 'no-cache' });
+        if (!r.ok) throw new Error(file + ' is missing next to this page');
+        py.FS.writeFile('/home/pyodide/' + file, await r.text());
+      }
+      py.runPython("import sys\nif '/home/pyodide' not in sys.path: sys.path.insert(0, '/home/pyodide')");
+      const mod = py.pyimport('scope_api');
+      mod.STATE.reads_text = false; // this page reads the on-screen text and hands it to Python
+      ENGINE.py = py; ENGINE.handle = mod.handle_json; ENGINE.state = 'ready';
+    } catch (e) { ENGINE.state = 'failed'; ENGINE.error = (e && e.message) || String(e); }
+    showEngine();
+    if (ENGINE.state === 'ready') startOcr();
+  }
+  function startOcr() {
+    OCR.state = 'loading'; showEngine();
+    OCR.ready = (async () => {
+      try {
+        if (!window.Tesseract) await loadScript(OCR_SRC);
+        OCR.worker = await window.Tesseract.createWorker('eng', 1);
+        await OCR.worker.setParameters({ tessedit_pageseg_mode: '6' }); // a block of lines: one pass reads a whole sheet
+        OCR.state = 'ready';
+      } catch (e) { OCR.state = 'off'; OCR.error = (e && e.message) || String(e); }
+      showEngine();
+    })();
+  }
+
+  async function api(path, opts) {
+    if (ENGINE.mode !== 'browser') return serverApi(path, opts);
+    if (ENGINE.state !== 'ready') throw new Error('The Python engine did not start: ' + ENGINE.error);
+    const url = new URL(path, 'http://local'), query = Object.fromEntries(url.searchParams);
+    let body = opts && opts.body;
+    if (body instanceof Blob) body = new Uint8Array(await body.arrayBuffer());
+    else if (typeof body === 'string') body = new TextEncoder().encode(body);
+    // Let the page repaint before Python takes the thread. A message is used, not a timer:
+    // browsers slow timers right down in a tab that is not in front.
+    await new Promise(r => { const ch = new MessageChannel(); ch.port1.onmessage = () => r(); ch.port2.postMessage(0); });
+    const proxy = ENGINE.handle((opts && opts.method) || 'GET', url.pathname, JSON.stringify(query), body || new Uint8Array(0));
+    const res = proxy.toJs({ dict_converter: Object.fromEntries }); proxy.destroy();
+    const data = res.kind === 'application/json' ? JSON.parse(res.text) : res.kind.startsWith('text/') ? res.text : new Blob([res.bytes], { type: res.kind });
+    if (res.status >= 400) throw new Error((data && data.error) || 'The request failed.');
+    return data;
+  }
+  async function serverApi(path, opts) {
+    let r;
+    try { r = await fetch(path, opts); }
+    catch (e) { S.offline = true; showEngine(); throw new Error('The Python program is not answering. Start it again, then reload this page.'); }
+    if (S.offline) { S.offline = false; showEngine(); }
+    const kind = r.headers.get('Content-Type') || '';
+    const data = kind.includes('json') ? await r.json() : kind.startsWith('text/') ? await r.text() : await r.blob();
+    if (!r.ok) throw new Error((data && data.error) || 'The request failed.');
+    return data;
+  }
+  function showEngine() {
+    const box = $('#engine'); box.textContent = '';
+    const say = (dot, text) => box.append(h('span', { class: 'dot ' + dot }), text);
+    if (ENGINE.mode === 'browser') {
+      if (ENGINE.state === 'starting') say('warn', 'Starting the Python engine inside this browser. The first visit downloads about 15 MB; after that it starts quickly.');
+      else if (ENGINE.state === 'failed') say('off', 'The Python engine could not start (' + ENGINE.error + '). Check the internet connection and reload the page.');
+      else if (OCR.state === 'loading') say('warn', 'Python is running inside this browser. Loading the text reader…');
+      else if (OCR.state === 'off') say('warn', 'Running inside this browser; nothing is uploaded. The text reader could not load (' + OCR.error + '), so type the scales into each card.');
+      else say('', 'Running entirely inside this browser: your images are not uploaded anywhere. Traces and on-screen text are read, then cross-checked.');
+    } else if (S.offline) say('off', 'The Python program has stopped. Start it again with "Run Scope Digitizer", then reload this page.');
+    else if (ENGINE.state === 'starting') say('warn', 'Connecting…');
+    else if (S.textReader === false) say('warn', 'Connected to Python on this Mac, but its text reader is not available. Type the scales into each card.');
+    else say('', 'Connected to Python on this Mac. It reads the traces and the on-screen text, then cross-checks one against the other.');
+  }
+  // Pictures come through the same channel as everything else, so they work with either engine.
+  const pictures = new Map();
+  function apiImage(path, attrs) {
+    const img = h('img', attrs);
+    if (ENGINE.mode !== 'browser') { img.src = path; return img; }
+    if (pictures.has(path)) img.src = pictures.get(path);
+    else api(path).then(blob => { const u = URL.createObjectURL(blob); pictures.set(path, u); img.src = u; }).catch(() => {});
+    return img;
+  }
+
+  /* ---------- reading on-screen text in the browser (only when Python runs here) ---------- */
+
+  // Cut a region, enlarge it, and turn it into dark text on white, which the reader handles best.
+  function prep(src, x, y, w, hgt, scale, gamma, cut) {
+    x = Math.max(0, Math.round(x)); y = Math.max(0, Math.round(y));
+    w = Math.min(src.width - x, Math.round(w)); hgt = Math.min(src.height - y, Math.round(hgt));
+    if (w < 4 || hgt < 4) return null;
+    const pad = 16, c = h('canvas'), W = Math.round(w * scale), H = Math.round(hgt * scale);
+    c.width = W + pad * 2; c.height = H + pad * 2;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+    g.drawImage(src, x, y, w, hgt, pad, pad, W, H);
+    const id = g.getImageData(pad, pad, W, H), d = id.data, hist = new Uint32Array(256);
+    for (let i = 0; i < d.length; i += 4) hist[Math.max(d[i], d[i + 1], d[i + 2])]++;
+    let bg = 0, lo = 0, hi = 255;
+    for (let v = 1; v < 256; v++) if (hist[v] > hist[bg]) bg = v;
+    while (hi > 0 && !hist[hi]) hi--;
+    while (lo < 255 && !hist[lo]) lo++;
+    const far = bg > 140 ? lo : hi, span = Math.abs(far - bg);
+    if (span < 70) return null;
+    for (let i = 0; i < d.length; i += 4) {
+      let t = Math.min(1, Math.max(0, Math.abs(Math.max(d[i], d[i + 1], d[i + 2]) - bg) / span));
+      if (gamma) t = Math.pow(t, gamma);
+      if (cut) t = t > cut ? 1 : 0;
+      d[i] = d[i + 1] = d[i + 2] = Math.round(255 - 255 * t); d[i + 3] = 255;
+    }
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.putImageData(id, pad, pad);
+    return c;
+  }
+  // The reader slips on single characters, and which ones depends on how the text is prepared,
+  // so every field is read several ways and Python puts the readings to a vote. These seven are
+  // the settings that read known captures best; all of them thicken the scope's thin strokes
+  // (gamma below 1, or a low black/white cut) or keep the enlargement modest.
+  const VARIANTS = [{ s: 3, gamma: 0.7 }, { s: 3, cut: 0.3 }, { s: 2, gamma: 0.6 }, { s: 3 }, { s: 3.25, gamma: 0.7 }, { s: 2, cut: 0.3 }, { s: 3, gamma: 0.8 }];
+  async function readFields(shot) {
+    await OCR.ready;
+    if (OCR.state !== 'ready') return null;
+    const bmp = await createImageBitmap(await api('/api/shot/' + shot.id + '/image.png'));
+    const cv = h('canvas'); cv.width = bmp.width; cv.height = bmp.height;
+    cv.getContext('2d', { willReadFrequently: true }).drawImage(bmp, 0, 0);
+    const texts = {};
+    for (const f of shot.fields) texts[f.name] = [];
+    for (const v of VARIANTS) {
+      // All fields of this image go on one sheet, a line each, so one pass of the reader covers them.
+      const parts = shot.fields.map(f => prep(cv, f.box[0], f.box[1], f.box[2], f.box[3], v.s, v.gamma, v.cut)), gap = 36, rows = [];
+      const sheet = h('canvas');
+      sheet.width = Math.max(100, ...parts.map(c => c ? c.width : 0)) + 48;
+      sheet.height = parts.reduce((sum, c) => sum + (c ? c.height + gap : 0), 48);
+      const g = sheet.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, sheet.width, sheet.height);
+      let y = 24;
+      parts.forEach((c, i) => {
+        const row = { name: shot.fields[i].name, top: y, bottom: y, found: [] };
+        if (c) { g.drawImage(c, 24, y); row.bottom = y + c.height; y += c.height + gap; }
+        rows.push(row);
+      });
+      const res = await OCR.worker.recognize(sheet.toDataURL('image/png'));
+      for (const line of res.data.lines || []) {
+        const mid = (line.bbox.y0 + line.bbox.y1) / 2, row = rows.find(r => mid >= r.top && mid <= r.bottom);
+        if (row) row.found.push([line.bbox.x0, (line.text || '').replace(/\s+/g, ' ').trim()]);
+      }
+      for (const row of rows) texts[row.name].push(row.found.sort((a, b) => a[0] - b[0]).map(p => p[1]).join(' '));
+    }
+    return texts;
+  }
+
+  /* ---------- chart drawing ---------- */
+
+  const colourOf = (s, p) => (s.key && p[s.key]) || p.slots[(s.slot || 0) % 8];
+  function lowerBound(a, v) { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < v) lo = m + 1; else hi = m; } return lo; }
+  function finishSeries(s) {
+    let mn = Infinity, mx = -Infinity, sorted = true;
+    for (let i = 0; i < s.x.length; i++) { const v = s.x[i]; if (v < mn) mn = v; if (v > mx) mx = v; if (i && v < s.x[i - 1]) sorted = false; }
+    s.xmin = mn; s.xmax = mx; s.sorted = sorted;
+    return s;
+  }
+  function indexRange(s, x0, x1) {
+    if (!s.sorted) return [0, s.x.length - 1];
+    return [Math.max(0, lowerBound(s.x, x0) - 1), Math.min(s.x.length - 1, lowerBound(s.x, x1))];
+  }
+  function nearestIndex(s, x) {
+    if (!s.x.length) return -1;
+    if (s.sorted) { const i = lowerBound(s.x, x); if (i <= 0) return 0; if (i >= s.x.length) return s.x.length - 1; return x - s.x[i - 1] <= s.x[i] - x ? i - 1 : i; }
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < s.x.length; i++) { const d = Math.abs(s.x[i] - x); if (d < bd) { bd = d; best = i; } }
+    return best;
+  }
+  function yRange(s, x0, x1, band) {
+    const r = indexRange(s, x0, x1), useBand = band && s.lo && s.hi;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = r[0]; i <= r[1]; i++) {
+      if (s.x[i] < x0 || s.x[i] > x1) continue;
+      const a = useBand ? Math.min(s.lo[i], s.y[i]) : s.y[i], b = useBand ? Math.max(s.hi[i], s.y[i]) : s.y[i];
+      if (a < lo) lo = a; if (b > hi) hi = b;
+    }
+    return [lo, hi];
+  }
+  const decimals = step => Math.max(0, Math.min(8, -Math.floor(Math.log10(step) + 1e-9)));
+
+  function strokeSeries(ctx, s, X, Y, x0, x1, plotW) {
+    const r = indexRange(s, x0, x1), n = r[1] - r[0] + 1;
+    ctx.beginPath();
+    if (n <= plotW * 3 || !s.sorted) {
+      let pen = false;
+      for (let i = r[0]; i <= r[1]; i++) {
+        if (!isFinite(s.y[i]) || !isFinite(s.x[i])) { pen = false; continue; }
+        if (pen) ctx.lineTo(X(s.x[i]), Y(s.y[i])); else { ctx.moveTo(X(s.x[i]), Y(s.y[i])); pen = true; }
+      }
+    } else {
+      // Many points per pixel: draw each pixel column's min-max span so no peak is lost.
+      let col = null, mn = 0, mx = 0, last = 0, pen = false;
+      const flush = () => { if (col == null) return; if (pen) ctx.lineTo(col, Y(mn)); else { ctx.moveTo(col, Y(mn)); pen = true; } ctx.lineTo(col, Y(mx)); ctx.lineTo(col, Y(last)); };
+      for (let i = r[0]; i <= r[1]; i++) {
+        const v = s.y[i]; if (!isFinite(v)) continue;
+        const c = Math.round(X(s.x[i]));
+        if (c !== col) { flush(); col = c; mn = mx = v; }
+        if (v < mn) mn = v; if (v > mx) mx = v; last = v;
+      }
+      flush();
+    }
+    ctx.stroke();
+  }
+
+  function drawChart(ctx, W, H, g, o) {
+    const p = o.pal, F = (px, wt) => (wt || 400) + ' ' + px + 'px system-ui, -apple-system, "Segoe UI", sans-serif';
+    ctx.fillStyle = p.surface; ctx.fillRect(0, 0, W, H);
+    const ser = g.series, overlay = o.layout === 'overlay' || ser.length === 1;
+    const panels = overlay ? [ser] : ser.map(s => [s]);
+    const padL = 66, padR = 20, padB = 46, headH = 24, gap = 12;
+    let top = 8;
+    if (o.title) {
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = p.ink; ctx.font = F(17, 600); ctx.fillText(g.title, 20, 30, W - 40);
+      top = 44;
+    }
+    const plotW = W - padL - padR;
+    const ph = (H - top - padB - panels.length * headH - (panels.length - 1) * gap) / panels.length;
+    let x0 = Infinity, x1 = -Infinity;
+    for (const s of ser) { if (s.xmin < x0) x0 = s.xmin; if (s.xmax > x1) x1 = s.xmax; }
+    if (o.xRange) { x0 = o.xRange[0]; x1 = o.xRange[1]; }
+    if (!(x1 > x0)) x1 = x0 + 1;
+    const X = v => padL + (v - x0) / (x1 - x0) * plotW;
+    const xs = unitScale(Math.max(Math.abs(x0), Math.abs(x1)), g.unitX);
+    const xt = niceTicks(x0 / xs.f, x1 / xs.f, Math.max(2, Math.floor(plotW / 95)));
+    const lay = { W, H, padL, padR, plotW, x0, x1, panels: [] };
+    let y = top;
+    for (const ps of panels) {
+      const mid = y + headH / 2;
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.font = F(12.5, 500);
+      let lx = padL;
+      for (const s of ps) {
+        ctx.strokeStyle = colourOf(s, p); ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(lx + 1, mid); ctx.lineTo(lx + 17, mid); ctx.stroke();
+        ctx.fillStyle = p.ink; ctx.fillText(s.name, lx + 24, mid + 0.5);
+        lx += 24 + ctx.measureText(s.name).width + 18;
+      }
+      const py = y + headH;
+      let lo = Infinity, hi = -Infinity;
+      for (const s of ps) { const r = yRange(s, x0, x1, o.band); if (r[0] < lo) lo = r[0]; if (r[1] > hi) hi = r[1]; }
+      if (!isFinite(lo) || !isFinite(hi)) { lo = 0; hi = 1; }
+      if (hi - lo <= Math.abs(hi) * 1e-9) { const d = Math.abs(hi) * 0.1 || 1; lo -= d; hi += d; }
+      const padY = (hi - lo) * 0.08; lo -= padY; hi += padY;
+      const unit = ps.every(s => s.unit === ps[0].unit) ? ps[0].unit : '';
+      const ys = unitScale(Math.max(Math.abs(lo), Math.abs(hi)), unit);
+      const yt = niceTicks(lo / ys.f, hi / ys.f, Math.max(2, Math.floor(ph / 34)));
+      const Y = v => py + ph - (v - lo) / (hi - lo) * ph;
+      ctx.fillStyle = p.muted; ctx.font = F(11.5); ctx.textAlign = 'right';
+      const ylabel = ys.label || ps[0].yLabel || '';
+      if (ylabel) ctx.fillText(ylabel, padL - 8, mid + 0.5);
+      ctx.lineWidth = 1; ctx.lineCap = 'butt';
+      for (const t of xt.ticks) { const xx = Math.round(X(t * xs.f)) + 0.5; ctx.strokeStyle = p.grid; ctx.beginPath(); ctx.moveTo(xx, py); ctx.lineTo(xx, py + ph); ctx.stroke(); }
+      for (const t of yt.ticks) {
+        const yy = Math.round(Y(t * ys.f)) + 0.5;
+        ctx.strokeStyle = t === 0 ? p.axis : p.grid; ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(padL + plotW, yy); ctx.stroke();
+        ctx.fillStyle = p.muted; ctx.fillText(t.toFixed(decimals(yt.step)), padL - 8, yy);
+      }
+      ctx.save(); ctx.beginPath(); ctx.rect(padL, py, plotW, ph); ctx.clip();
+      for (const s of ps) {
+        const col = colourOf(s, p);
+        if (o.band && s.lo && s.hi) {
+          const r = indexRange(s, x0, x1);
+          ctx.beginPath();
+          for (let i = r[0]; i <= r[1]; i++) { if (i === r[0]) ctx.moveTo(X(s.x[i]), Y(s.hi[i])); else ctx.lineTo(X(s.x[i]), Y(s.hi[i])); }
+          for (let i = r[1]; i >= r[0]; i--) ctx.lineTo(X(s.x[i]), Y(s.lo[i]));
+          ctx.closePath(); ctx.globalAlpha = 0.16; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
+        }
+        ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+        strokeSeries(ctx, s, X, Y, x0, x1, plotW);
+      }
+      ctx.restore();
+      lay.panels.push({ y: py, h: ph, lo, hi, series: ps });
+      y = py + ph + gap;
+    }
+    const base = y - gap;
+    ctx.lineWidth = 1; ctx.strokeStyle = p.axis; ctx.beginPath(); ctx.moveTo(padL, Math.round(base) + 0.5); ctx.lineTo(padL + plotW, Math.round(base) + 0.5); ctx.stroke();
+    ctx.fillStyle = p.muted; ctx.font = F(11.5); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (const t of xt.ticks) ctx.fillText(t.toFixed(decimals(xt.step)), X(t * xs.f), base + 7);
+    ctx.fillStyle = p.ink2; ctx.font = F(12);
+    ctx.fillText((g.xName || 'x') + (xs.label ? ' (' + xs.label + ')' : ''), padL + plotW / 2, base + 26);
+    lay.top = lay.panels[0].y; lay.bottom = base;
+    if (o.sel) { ctx.globalAlpha = 0.1; ctx.fillStyle = p.ink; ctx.fillRect(Math.min(o.sel[0], o.sel[1]), lay.top, Math.abs(o.sel[1] - o.sel[0]), base - lay.top); ctx.globalAlpha = 1; }
+    if (o.hover != null && o.hover >= x0 && o.hover <= x1) {
+      const hx = Math.round(X(o.hover)) + 0.5;
+      ctx.strokeStyle = p.muted; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hx, lay.top); ctx.lineTo(hx, base); ctx.stroke();
+      for (const pn of lay.panels) for (const s of pn.series) {
+        const i = nearestIndex(s, o.hover); if (i < 0 || !isFinite(s.y[i])) continue;
+        const cy = pn.y + pn.h - (s.y[i] - pn.lo) / (pn.hi - pn.lo) * pn.h;
+        if (cy < pn.y - 1 || cy > pn.y + pn.h + 1) continue;
+        ctx.beginPath(); ctx.arc(X(s.x[i]), cy, 6, 0, Math.PI * 2); ctx.fillStyle = p.surface; ctx.fill();
+        ctx.beginPath(); ctx.arc(X(s.x[i]), cy, 4, 0, Math.PI * 2); ctx.fillStyle = colourOf(s, p); ctx.fill();
+      }
+    }
+    return lay;
+  }
+
+  const show = (v, unit) => unit ? fmtSI(v, unit, 5) : String(Number(v.toPrecision(6)));
+
+  // One interactive chart: hover readout, drag to zoom, arrow keys. Returns its controls bar too.
+  function createChart(wrap) {
+    const cv = h('canvas', { tabindex: '0', role: 'img', 'aria-label': 'Waveform graph. Use the left and right arrow keys to step through values, or open the points table.' });
+    const tip = h('div', { class: 'tip', hidden: true });
+    wrap.textContent = ''; wrap.append(cv, tip);
+    const st = { group: null, layout: 'stack', band: true, xRange: null, hover: null, sel: null, drag: null, lay: null };
+    const bar = h('div', { class: 'tools' });
+    function height(W) {
+      const n = st.layout === 'overlay' || st.group.series.length === 1 ? 1 : st.group.series.length;
+      return n === 1 ? Math.round(Math.max(280, Math.min(420, W * 0.5))) : n * 180 + 70;
+    }
+    function render() {
+      const g = st.group, W = wrap.clientWidth;
+      if (!g || !g.series.length || !W) return;
+      const H = height(W), dpr = window.devicePixelRatio || 1;
+      if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.height = H + 'px'; }
+      const ctx = cv.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      st.lay = drawChart(ctx, W, H, g, { pal: pal(), layout: st.layout, band: st.band, xRange: st.xRange, hover: st.hover, sel: st.sel });
+    }
+    function showTip(y) {
+      const g = st.group, L = st.lay;
+      if (!g || st.hover == null || !L) { tip.hidden = true; return; }
+      const p = pal(); tip.textContent = '';
+      tip.append(h('div', { class: 'tip-x', text: (g.xName || 'x') + ' ' + show(st.hover, g.unitX) }));
+      for (const s of g.series) {
+        const i = nearestIndex(s, st.hover); if (i < 0) continue;
+        tip.append(h('div', { class: 'tip-row' }, h('i', { class: 'sw', style: 'background:' + colourOf(s, p) }), h('b', { text: show(s.y[i], s.unit) }), h('span', { text: s.name })));
+      }
+      tip.hidden = false;
+      const hx = L.padL + (st.hover - L.x0) / (L.x1 - L.x0) * L.plotW, tw = tip.offsetWidth, th = tip.offsetHeight;
+      const left = hx + 14 + tw > L.W - 4 ? hx - 14 - tw : hx + 14;
+      const topPx = Math.max(4, Math.min(L.H - th - 4, (y == null ? L.top + 8 : y) - th / 2));
+      tip.style.transform = 'translate(' + Math.round(Math.max(4, left)) + 'px,' + Math.round(topPx) + 'px)';
+    }
+    function setHover(x, y) {
+      if (!st.group) return;
+      if (x == null) st.hover = null;
+      else { const s = st.group.series[0], i = nearestIndex(s, x); st.hover = i < 0 ? null : s.x[i]; }
+      render(); showTip(y);
+    }
+    function buildBar() {
+      bar.textContent = '';
+      const g = st.group;
+      if (!g) return;
+      if (g.series.length > 1) {
+        const mk = (label, value) => h('button', { type: 'button', class: 'btn small', 'aria-pressed': st.layout === value ? 'true' : 'false', text: label, onclick: () => { st.layout = value; buildBar(); render(); } });
+        bar.append(h('div', { class: 'seg', role: 'group', 'aria-label': 'Layout' }, mk('Stacked', 'stack'), mk('Overlay', 'overlay')));
+      }
+      if (g.series.some(s => s.lo && s.hi)) {
+        bar.append(h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: st.band, onchange: e => { st.band = e.target.checked; render(); } }), ' Line thickness band'));
+      }
+      if (st.xRange) bar.append(h('button', { type: 'button', class: 'btn small', text: 'Reset zoom', onclick: () => { st.xRange = null; buildBar(); render(); } }));
+      bar.append(h('button', { type: 'button', class: 'btn small', text: 'Save PNG', onclick: async () => saveBlob(await chartPng(g, st), (g.title.replace(/[^\w.\-]+/g, '_') || 'graph') + '.png') }));
+    }
+    const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    const toX = mx => st.lay.x0 + (mx - st.lay.padL) / st.lay.plotW * (st.lay.x1 - st.lay.x0);
+    cv.addEventListener('pointerdown', e => { if (!st.lay || e.button) return; const m = pos(e); if (m[0] < st.lay.padL || m[0] > st.lay.padL + st.lay.plotW) return; st.drag = m[0]; try { cv.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ } });
+    cv.addEventListener('pointermove', e => {
+      if (!st.lay) return;
+      const m = pos(e), inside = m[0] >= st.lay.padL && m[0] <= st.lay.padL + st.lay.plotW;
+      if (st.drag != null) { const mx = Math.max(st.lay.padL, Math.min(st.lay.padL + st.lay.plotW, m[0])); st.sel = Math.abs(mx - st.drag) > 4 ? [st.drag, mx] : null; }
+      if (inside) setHover(toX(m[0]), m[1]); else setHover(null);
+    });
+    cv.addEventListener('pointerup', () => {
+      if (st.drag != null && st.sel) { const a = toX(Math.min(st.sel[0], st.sel[1])), b = toX(Math.max(st.sel[0], st.sel[1])); if (b > a) st.xRange = [a, b]; }
+      st.drag = null; st.sel = null; buildBar(); render();
+    });
+    cv.addEventListener('pointerleave', () => { if (st.drag == null) setHover(null); });
+    cv.addEventListener('dblclick', () => { st.xRange = null; buildBar(); render(); });
+    cv.addEventListener('keydown', e => {
+      if (!st.group || !st.lay) return;
+      if (e.key === 'Escape') { setHover(null); return; }
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const s = st.group.series[0], step = (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1);
+      let i = st.hover == null ? nearestIndex(s, (st.lay.x0 + st.lay.x1) / 2) : nearestIndex(s, st.hover) + step;
+      i = Math.max(0, Math.min(s.x.length - 1, i));
+      if (s.x[i] >= st.lay.x0 && s.x[i] <= st.lay.x1) setHover(s.x[i]);
+    });
+    cv.addEventListener('blur', () => setHover(null));
+    if (window.ResizeObserver) new ResizeObserver(render).observe(wrap);
+    return { st, bar, render, setGroup(g) { st.group = g; st.xRange = null; st.hover = null; tip.hidden = true; buildBar(); render(); } };
+  }
+  function chartPng(g, st) {
+    const W = 1200, n = st.layout === 'overlay' || g.series.length === 1 ? 1 : g.series.length, H = n === 1 ? 620 : n * 250 + 130;
+    const c = h('canvas'); c.width = W * 2; c.height = H * 2;
+    const ctx = c.getContext('2d'); ctx.scale(2, 2);
+    drawChart(ctx, W, H, g, { pal: PAL.light, layout: st.layout, band: st.band, xRange: st.xRange, title: true });
+    return new Promise(res => c.toBlob(res, 'image/png'));
+  }
+  function pointsTable(g) {
+    const s0 = g.series[0], same = g.series.filter(s => s.x.length === s0.x.length), n = Math.min(s0.x.length, 2000), tb = h('tbody');
+    const cell = v => isFinite(v) ? String(Number(v.toPrecision(9))) : '';
+    for (let i = 0; i < n; i++) tb.append(h('tr', null, h('td', { class: 'idx', text: i + 1 }), h('td', { text: cell(s0.x[i]) }), same.map(s => h('td', { text: cell(s.y[i]) }))));
+    const unit = u => u ? ' (' + u + ')' : '';
+    const box = h('div', { class: 'tablewrap' }, h('table', null, h('thead', null, h('tr', null, h('th', { class: 'idx', text: '#' }),
+      h('th', { text: 'x' + unit(g.unitX || g.xUnitLabel) }), same.map(s => h('th', { text: s.name + ' y' + unit(s.unit || s.yLabel) })))), tb));
+    if (s0.x.length > n) box.append(h('p', { class: 'fine', style: 'padding:8px 12px', text: 'Showing the first ' + n + ' of ' + s0.x.length + ' rows.' }));
+    return box;
+  }
+
+  /* ---------- image cards ---------- */
+
+  const CHIP = { OK: ['ok', '✓', 'OK'], Review: ['review', '!', 'Review'], Failed: ['fail', '×', 'Failed'], Skipped: ['wait', '–', 'Not a scope capture'], wait: ['wait', '…', 'Reading'] };
+
+  function addImages(files) {
+    files = files.filter(isImage).sort(byName);
+    if (!files.length) { toast('No image files found in what you added.'); return; }
+    for (const f of files) { const c = { key: 'n' + Math.random().toString(36).slice(2), file: f, name: f.name, shot: null }; S.cards.push(c); S.queue.push(c); renderCard(c); }
+    updateCounts(); pump();
+  }
+  async function pump() {
+    if (S.busy) return;
+    S.busy = true;
+    await ENGINE.ready;
+    while (S.queue.length) {
+      const c = S.queue.shift();
+      try {
+        let res = await api('/api/add?name=' + encodeURIComponent(c.name), { method: 'POST', body: c.file });
+        if (res.shot.fields) {
+          const texts = await readFields(res.shot);
+          res = await api('/api/shot/' + res.shot.id + '/texts', { method: 'POST', body: JSON.stringify({ texts }) });
+        } else S.textReader = res.text_reader;
+        c.shot = res.shot; c.file = null;
+      } catch (e) { c.shot = { status: 'Failed', notes: [e.message], usable: false, name: c.name }; }
+      renderCard(c); updateCounts(); showEngine();
+    }
+    S.busy = false;
+    updatePreview();
+  }
+  async function setValue(c, key, text) {
+    try {
+      const res = await api('/api/shot/' + c.shot.id + '/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: text }) });
+      c.shot = res.shot; c.pts = null;
+    } catch (e) { toast(e.message); }
+    renderCard(c); updateCounts(); updatePreview();
+  }
+  function fieldInput(id, label, value, invalid, onchange, swatch) {
+    return h('label', { class: 'field', for: id },
+      h('span', { class: 'key' }, swatch ? h('i', { class: 'sw', style: 'background:' + swatch }) : null, label),
+      h('input', { id, type: 'text', value, 'aria-invalid': invalid ? 'true' : null, autocomplete: 'off', spellcheck: 'false', onchange }));
+  }
+
+  function renderCard(c) {
+    const sh = c.shot, state = CHIP[sh ? sh.status : 'wait'] || CHIP.wait;
+    const old = document.getElementById('card-' + c.key);
+    const focusId = old && old.contains(document.activeElement) ? document.activeElement.id : null;
+    const li = h('li', { class: 'card', id: 'card-' + c.key, 'data-status': state[0] });
+    const head = h('div', { class: 'card-head' },
+      h('span', { class: 'chip ' + state[0] }, h('span', { 'aria-hidden': 'true', text: state[1] }), state[2]),
+      h('span', { class: 'fname', text: c.name }), h('span', { class: 'grow' }));
+    li.append(head);
+    if (sh && sh.usable) {
+      head.append(h('button', { type: 'button', class: 'btn small', 'aria-expanded': c.open ? 'true' : 'false', text: c.open ? 'Hide review' : 'Review', onclick: () => { c.open = !c.open; renderCard(c); } }));
+      const v = '?v=' + sh.rev;
+      li.append(h('span', { class: 'cap', text: 'Status line from the screenshot' }),
+        h('div', { class: 'strip' }, apiImage('/api/shot/' + sh.id + '/strip.png' + v, { alt: 'The status line cut from this screenshot', width: 740, height: 19 })));
+      const p = pal(), fields = h('div', { class: 'fields' });
+      for (const ch of sh.channels) {
+        // A math trace has no scale on screen, so an empty box there is normal, not an error.
+        fields.append(fieldInput('sc-' + sh.id + '-' + ch.n, ch.label + ' per division', ch.scale, !ch.scale_ok && ch.key !== 'math', e => setValue(c, ch.key, e.target.value), p[ch.colour]));
+      }
+      fields.append(fieldInput('td-' + sh.id, 'Time per division', sh.time, !sh.time_ok, e => setValue(c, 'time', e.target.value)));
+      fields.append(h('div', { class: 'field' }, h('span', { class: 'key', text: 'Time zero from' }), h('span', { class: 'val', text: sh.x0_from })));
+      li.append(fields);
+      if (sh.checks.length) {
+        li.append(h('ul', { class: 'checks', 'aria-label': 'Cross-checks' }, sh.checks.map(k => h('li', null,
+          h('span', { class: k.ok ? 'good' : 'bad', text: k.ok ? '✓ ' : '× ' }), h('b', { text: k.what }), ' screen ' + k.screen + ', trace ' + k.trace))));
+      } else if (sh.status === 'OK') {
+        li.append(h('ul', { class: 'checks' }, h('li', { text: 'No on-screen measurement to cross-check against, so compare the values above with the status line.' })));
+      }
+    }
+    if (sh) head.append(h('button', { type: 'button', class: 'btn small', 'aria-label': 'Remove ' + c.name, text: 'Remove', onclick: () => removeCard(c) }));
+    if (sh && sh.notes && sh.notes.length) li.append(h('ul', { class: 'notes' }, sh.notes.map(n => h('li', { text: n }))));
+    if (sh && sh.remarks && sh.remarks.length) li.append(h('ul', { class: 'remarks' }, sh.remarks.map(n => h('li', { text: n }))));
+    if (sh && sh.usable && c.open) li.append(renderReview(c));
+    if (old) old.replaceWith(li); else $('#cards').append(li);
+    li.hidden = $('#only-review').checked && sh && sh.status === 'OK';
+    if (focusId) { const f = document.getElementById(focusId); if (f) f.focus(); }
+  }
+
+  async function loadPoints(c) {
+    const sh = c.shot;
+    if (c.pts && c.pts.rev === sh.rev && c.pts.coords === S.fmt.coords) return c.pts.group;
+    const d = await api('/api/shot/' + sh.id + '/points?coords=' + S.fmt.coords), px = d.x_unit === 'px';
+    const group = { title: d.title, unitX: px ? '' : 's', xName: px ? 'x (px)' : 'Time', xUnitLabel: px ? 'px' : '',
+      series: d.series.map(s => finishSeries({ name: s.name, key: s.colour, unit: px ? '' : s.unit, yLabel: px ? 'px' : '', n: s.n,
+        x: Float64Array.from(s.x), y: Float64Array.from(s.y), lo: Float64Array.from(s.lo), hi: Float64Array.from(s.hi) })) };
+    c.pts = { rev: sh.rev, coords: S.fmt.coords, group };
+    return group;
+  }
+
+  // The review area of a card: screenshot with overlay, graph, or the points themselves.
+  function renderReview(c) {
+    const sh = c.shot, box = h('div', { class: 'detail' }), view = c.view || 'shot', body = h('div');
+    const tab = (label, value) => h('button', { type: 'button', class: 'btn small', 'aria-pressed': view === value ? 'true' : 'false', text: label, onclick: () => { c.view = value; renderCard(c); } });
+    const tools = h('div', { class: 'tools' }, h('div', { class: 'seg', role: 'group', 'aria-label': 'What to review' }, tab('Screenshot', 'shot'), tab('Graph', 'graph'), tab('Points', 'points')));
+    box.append(tools, body);
+    const empty = () => body.append(h('p', { class: 'fine', text: 'Fill in the scales above first; the points need them to be in volts and seconds.' }));
+    if (view === 'shot') {
+      const id = 'ov-' + sh.id, on = c.overlay !== false;
+      tools.append(h('label', { class: 'chk', for: id }, h('input', { type: 'checkbox', id, checked: on, onchange: e => { c.overlay = e.target.checked; renderCard(c); } }), ' Show the extracted line'));
+      body.className = 'shot';
+      body.append(apiImage('/api/shot/' + sh.id + '/' + (on ? 'check' : 'image') + '.png?v=' + sh.rev, { alt: 'The screenshot' + (on ? ' with the extracted line drawn over it' : '') }));
+    } else if (view === 'graph') {
+      body.className = 'chart';
+      const chart = createChart(body);
+      tools.append(chart.bar);
+      loadPoints(c).then(g => { if (g.series.length) chart.setGroup(g); else { body.className = ''; body.textContent = ''; empty(); } }).catch(e => toast(e.message));
+    } else {
+      loadPoints(c).then(g => {
+        if (!g.series.length) { empty(); return; }
+        for (const s of g.series) {
+          const url = '/api/shot/' + sh.id + '/csv?ch=' + s.n + '&' + fmtQuery();
+          const file = (sh.channels.find(k => k.n === s.n) || {}).file || s.name + '.csv';
+          tools.append(h('button', { type: 'button', class: 'btn small', text: 'Download ' + s.name + ' CSV', onclick: async () => {
+              try { saveBlob(new Blob([await api(url)], { type: 'text/csv' }), file); } catch (e) { toast(e.message); }
+            } }),
+            h('button', { type: 'button', class: 'btn small', text: 'Copy ' + s.name, onclick: async () => {
+              try { await navigator.clipboard.writeText(await api(url)); toast(s.name + ' copied as CSV text.'); } catch (e) { toast('Could not copy: ' + e.message); }
+            } }));
+        }
+        body.append(pointsTable(g));
+      }).catch(e => toast(e.message));
+    }
+    const dl = h('dl', { class: 'kv' });
+    const row = (k, v) => { if (v) dl.append(h('dt', { text: k }), h('dd', { text: v })); };
+    row('Scope', sh.header); row('Run state', sh.run_state); row('Trigger', sh.trigger);
+    for (const ch of sh.channels) row(ch.label + ' from trace', [ch.max && 'max ' + ch.max, ch.min && 'min ' + ch.min, ch.freq && 'frequency ' + ch.freq, ch.filled ? ch.filled + ' columns filled in' : ''].filter(Boolean).join(', '));
+    box.append(h('div', { class: 'fields' },
+      fieldInput('dl-' + sh.id, 'Delay (used when no trigger marker is visible)', sh.delay, false, e => setValue(c, 'delay', e.target.value)),
+      sh.meas.map((m, i) => fieldInput('ms-' + sh.id + '-' + i, m.label, m.text, !m.sure, e => setValue(c, 'meas' + i, e.target.value)))), dl);
+    return box;
+  }
+
+  async function removeCard(c) {
+    if (c.shot && c.shot.id) { try { await api('/api/shot/' + c.shot.id + '/remove', { method: 'POST' }); } catch (e) { toast(e.message); return; } }
+    S.cards = S.cards.filter(x => x !== c);
+    const el = document.getElementById('card-' + c.key); if (el) el.remove();
+    updateCounts(); updatePreview();
+  }
+  function updateCounts() {
+    const n = S.cards.length, by = s => S.cards.filter(c => (c.shot ? c.shot.status : 'wait') === s).length;
+    const box = $('#counts'); box.textContent = '';
+    $('#no-cards').hidden = n > 0; $('#export').hidden = !n; $('#clear-all').hidden = !n;
+    if (!n) { box.append('No images yet'); return; }
+    const parts = [by('OK') + ' OK', by('Review') + ' to review'];
+    if (by('Skipped')) parts.push(by('Skipped') + ' not scope captures');
+    if (by('Failed')) parts.push(by('Failed') + ' failed');
+    if (by('wait')) parts.push(by('wait') + ' waiting');
+    box.append(n + (n === 1 ? ' image' : ' images') + ' ', h('span', { text: '· ' + parts.join(' · ') }));
+  }
+  // The first rows of the first exportable trace, in the chosen format.
+  let previewTurn = 0;
+  async function updatePreview() {
+    const turn = ++previewTurn, box = $('#preview'), c = S.cards.find(x => x.shot && x.shot.usable && x.shot.channels.some(ch => ch.ready || S.fmt.coords === 'pixels'));
+    if (!c) { box.textContent = 'Each file will look like this once an image has its scales.'; return; }
+    const ch = c.shot.channels.find(k => k.ready || S.fmt.coords === 'pixels');
+    try {
+      const text = await api('/api/shot/' + c.shot.id + '/csv?ch=' + ch.n + '&' + fmtQuery()), lines = text.split(/\r?\n/);
+      if (turn !== previewTurn) return; // a newer choice was made while this one was loading
+      const headAt = lines.findIndex(l => /^x \(/.test(l));
+      const shown = S.fmt.info === 'above' && headAt > 3 ? lines.slice(0, 2).concat('...', lines.slice(headAt, headAt + 4)) : lines.slice(0, 5);
+      box.textContent = ch.file + '\n' + shown.join('\n') + '\n...' + (S.fmt.info === 'below' ? '\n(readouts follow the last point)' : '');
+    } catch (e) { box.textContent = ''; }
+  }
+  async function downloadZip() {
+    const btn = $('#dl-zip'), label = btn.textContent;
+    const cards = S.cards.filter(c => c.shot && c.shot.usable), pixels = S.fmt.coords === 'pixels';
+    if (!cards.some(c => c.shot.channels.some(ch => ch.ready || pixels))) { toast('Nothing to download yet. Each image needs its scales filled in.'); return; }
+    btn.disabled = true;
+    try {
+      const enc = new TextEncoder(), files = [], bytes = async blob => new Uint8Array(await blob.arrayBuffer());
+      for (let i = 0; i < cards.length; i++) {
+        const sh = cards[i].shot;
+        btn.textContent = 'Packing ' + (i + 1) + ' of ' + cards.length + '…';
+        for (const ch of sh.channels) {
+          if (ch.ready || pixels) files.push({ name: 'csv/' + ch.file, data: enc.encode(await api('/api/shot/' + sh.id + '/csv?ch=' + ch.n + '&' + fmtQuery())) });
+        }
+        if ($('#zip-check').checked) files.push({ name: 'check/' + sh.stem + '_check.png', data: await bytes(await api('/api/shot/' + sh.id + '/check.png')) });
+        if ($('#zip-graphs').checked) {
+          const g = await loadPoints(cards[i]);
+          if (g.series.length) files.push({ name: 'graphs/' + sh.stem + '.png', data: await bytes(await chartPng(g, { layout: 'stack', band: false, xRange: null })) });
+        }
+      }
+      files.push({ name: 'summary.csv', data: enc.encode(await api('/api/summary.csv')) });
+      saveBlob(new Blob(zipStore(files), { type: 'application/zip' }), 'scope_export.zip');
+      toast('Saved scope_export.zip with ' + files.length + ' files.');
+    } catch (e) { toast(e.message); }
+    btn.disabled = false; btn.textContent = label;
+  }
+
+  /* ---------- CSV to graph ---------- */
+
+  let gChart = null;
+  const currentGroup = () => S.csvGroups.find(g => g.id === S.currentId) || null;
+  async function addCsvFiles(files) {
+    files = files.filter(isCsv).sort(byName);
+    if (!files.length) { toast('No CSV files found in what you added.'); return; }
+    const bad = [];
+    let firstId = null;
+    for (const f of files) {
+      let cols = [];
+      try { cols = parseCsv(await f.text()); } catch (e) { cols = []; }
+      if (cols.length < 2 || cols[0].values.length < 2) { bad.push(f.name); continue; }
+      const m = stem(f.name).match(/^(.*)_(?:ch([1-4])|(math))_(yellow|green|blue|pink|purple)$/);
+      const id = 'csv:' + (m ? m[1] : stem(f.name));
+      let g = S.csvGroups.find(x => x.id === id);
+      if (!g) { g = { id, title: id.slice(4), unitX: '', xName: 'x', series: [], files: [] }; S.csvGroups.push(g); }
+      g.series = g.series.filter(s => s.file !== f.name);
+      let xi = cols.findIndex(c => /^(time|t|x|x-axis|second|seconds|time_s)$/i.test(c.name)); if (xi < 0) xi = 0;
+      const x = cols[xi], timeLike = x.unit === 's' || /time|second|x-axis/i.test(x.name);
+      g.unitX = timeLike ? 's' : ''; g.xName = timeLike ? 'Time' : x.name + (x.unit ? ' (' + x.unit + ')' : ''); g.xUnitLabel = x.unit;
+      for (let j = 0; j < cols.length; j++) {
+        const c = cols[j];
+        if (j === xi || /^(flag|filled)$/i.test(c.name) || /_(min|max)$/i.test(c.name)) continue;
+        const slot = g.series.filter(s => !s.key).length;
+        if (slot >= 8) { toast(f.name + ' has more than 8 value columns. The first 8 are shown.'); break; }
+        const lo = cols.find(k => k.name === c.name + '_min'), hi = cols.find(k => k.name === c.name + '_max');
+        const chan = m ? (m[3] ? 5 : +m[2]) : /^[1-4]$/.test(c.name) ? +c.name : 0; // the scope's own CSV names its columns 1 to 4
+        const unit = c.unit === 'px' ? '' : c.unit || ({ volts: 'V', volt: 'V', voltage: 'V', amps: 'A' })[c.name.toLowerCase()] || '';
+        g.series.push(finishSeries({ file: f.name, name: chan === 5 ? 'Math' : chan ? 'CH' + chan : c.name, key: chan ? [null, 'yellow', 'green', 'blue', 'pink', 'purple'][chan] : null, slot,
+          unit, yLabel: c.unit === 'px' ? 'px' : '', x: x.values, y: c.values, lo: lo && hi ? lo.values : null, hi: lo && hi ? hi.values : null }));
+      }
+      if (!g.series.length) { S.csvGroups = S.csvGroups.filter(k => k !== g); bad.push(f.name); continue; }
+      if (!firstId) firstId = id;
+    }
+    if (bad.length) toast('Could not find numeric columns in: ' + bad.join(', '));
+    if (firstId) S.currentId = firstId;
+    setMode('graph');
+  }
+  function renderGraphTab() {
+    const g = currentGroup();
+    if (!g && S.csvGroups.length) { S.currentId = S.csvGroups[0].id; return renderGraphTab(); }
+    $('#gempty').hidden = !!g; $('#gwrap').hidden = !g;
+    if (!g) return;
+    const ul = $('#glist'); ul.textContent = '';
+    for (const k of S.csvGroups) ul.append(h('li', null, h('button', { type: 'button', 'aria-current': k.id === g.id ? 'true' : null, text: k.title, onclick: () => { S.currentId = k.id; renderGraphTab(); } })));
+    $('#glist-title').textContent = 'Graphs (' + S.csvGroups.length + ')';
+    $('#gtitle').textContent = g.title;
+    if (!gChart) { gChart = createChart($('#gchart')); $('#gtools').append(gChart.bar); }
+    if (gChart.st.group !== g) gChart.setGroup(g); else gChart.render();
+    const box = $('#gtable'); box.textContent = ''; box.hidden = !S.showTable;
+    if (S.showTable) box.append(pointsTable(g));
+  }
+  async function saveAllPng() {
+    const btn = $('#g-all'), label = btn.textContent;
+    btn.disabled = true;
+    try {
+      const files = [], used = new Map();
+      for (let i = 0; i < S.csvGroups.length; i++) {
+        const g = S.csvGroups[i], blob = await chartPng(g, { layout: gChart.st.layout, band: gChart.st.band, xRange: null });
+        let b = g.title.replace(/[^\w.\-]+/g, '_') || 'graph';
+        const k = used.get(b) || 0; used.set(b, k + 1); if (k) b += '_' + (k + 1);
+        files.push({ name: b + '.png', data: new Uint8Array(await blob.arrayBuffer()) });
+        btn.textContent = 'Drawing ' + (i + 1) + ' of ' + S.csvGroups.length + '…';
+      }
+      saveBlob(new Blob(zipStore(files), { type: 'application/zip' }), 'scope_graphs.zip');
+      toast('Saved ' + files.length + (files.length === 1 ? ' graph.' : ' graphs.'));
+    } catch (e) { toast('Saving failed: ' + e.message); }
+    btn.disabled = false; btn.textContent = label;
+  }
+
+  /* ---------- wiring ---------- */
+
+  function setMode(mode) {
+    S.mode = mode;
+    for (const m of ['convert', 'graph']) { $('#view-' + m).hidden = m !== mode; $('#tab-' + m).setAttribute('aria-selected', m === mode ? 'true' : 'false'); }
+    try { history.replaceState(null, '', '#' + mode); } catch (e) { /* not essential */ }
+    if (mode === 'graph') renderGraphTab();
+  }
+  async function filesFromDrop(dt) {
+    const entries = [];
+    for (const it of dt.items || []) { const e = it.webkitGetAsEntry && it.webkitGetAsEntry(); if (e) entries.push(e); }
+    if (!entries.length) return Array.from(dt.files || []);
+    const out = [];
+    async function walk(entry) {
+      if (entry.isFile) out.push(await new Promise((res, rej) => entry.file(res, rej)));
+      else if (entry.isDirectory) {
+        const rd = entry.createReader();
+        for (;;) { const batch = await new Promise((res, rej) => rd.readEntries(res, rej)); if (!batch.length) break; for (const e of batch) await walk(e); }
+      }
+    }
+    for (const e of entries) await walk(e);
+    return out;
+  }
+  function route(files) {
+    const imgs = files.filter(isImage), csvs = files.filter(isCsv);
+    if (imgs.length) { setMode('convert'); addImages(imgs); }
+    if (csvs.length) addCsvFiles(csvs);
+    if (!imgs.length && !csvs.length) toast('Nothing usable in what you added. Use PNG or JPG screenshots, or CSV files.');
+  }
+
+  async function start() {
+    $('#tab-convert').onclick = () => setMode('convert');
+    $('#tab-graph').onclick = () => setMode('graph');
+    $('#pick-files').onclick = () => $('#in-files').click();
+    $('#pick-folder').onclick = () => $('#in-folder').click();
+    $('#pick-csv').onclick = () => $('#in-csv').click();
+    for (const id of ['in-files', 'in-folder', 'in-csv']) $('#' + id).onchange = e => { route(Array.from(e.target.files)); e.target.value = ''; };
+    $('#only-review').onchange = () => S.cards.forEach(renderCard);
+    $('#dl-zip').onclick = downloadZip;
+    $('#clear-all').onclick = async () => {
+      try { await api('/api/clear', { method: 'POST' }); } catch (e) { toast(e.message); return; }
+      S.cards = []; S.queue = []; $('#cards').textContent = ''; updateCounts(); updatePreview();
+    };
+    try { Object.assign(S.fmt, JSON.parse(localStorage.getItem('scope-format') || '{}')); } catch (e) { /* storage may be blocked */ }
+    for (const key of ['coords', 'columns', 'info']) {
+      const sel = $('#fmt-' + key);
+      sel.value = S.fmt[key]; if (sel.value !== S.fmt[key]) { sel.selectedIndex = 0; S.fmt[key] = sel.value; }
+      sel.onchange = () => {
+        S.fmt[key] = sel.value;
+        try { localStorage.setItem('scope-format', JSON.stringify(S.fmt)); } catch (e) { /* storage may be blocked */ }
+        S.cards.forEach(c => { if (c.open) renderCard(c); });
+        updatePreview();
+      };
+    }
+    $('#g-table').onclick = e => { S.showTable = !S.showTable; e.target.setAttribute('aria-pressed', S.showTable ? 'true' : 'false'); e.target.textContent = S.showTable ? 'Hide points' : 'Show points'; renderGraphTab(); };
+    $('#g-all').onclick = saveAllPng;
+
+    let depth = 0;
+    const zones = () => document.querySelectorAll('.intake');
+    window.addEventListener('dragenter', e => { e.preventDefault(); depth++; zones().forEach(z => z.classList.add('over')); });
+    window.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) zones().forEach(z => z.classList.remove('over')); });
+    window.addEventListener('dragover', e => e.preventDefault());
+    window.addEventListener('drop', async e => { e.preventDefault(); depth = 0; zones().forEach(z => z.classList.remove('over')); route(await filesFromDrop(e.dataTransfer)); });
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { S.cards.forEach(renderCard); if (gChart) gChart.render(); });
+
+    updateCounts(); showEngine();
+    ENGINE.ready = startEngine();
+    await ENGINE.ready;
+    if (ENGINE.mode === 'server') {
+      try {
+        // Images already read in this run of the program come back after a page reload.
+        const res = await api('/api/shots');
+        S.textReader = res.text_reader;
+        for (const shot of res.shots) { const c = { key: 's' + shot.id, name: shot.name, shot }; S.cards.push(c); renderCard(c); }
+      } catch (e) { toast(e.message); }
+    }
+    updateCounts(); showEngine(); updatePreview();
+    if (location.hash === '#graph') setMode('graph');
+  }
+  // Handle for troubleshooting from the browser console.
+  window.__digitizer = { S, ENGINE, OCR, addImages, addCsvFiles };
+  start();
+})();
+</script>
+</body>
+</html>

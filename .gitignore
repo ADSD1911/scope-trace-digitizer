@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# results from local runs
+scope_output/
+python_output/
+check/
+csv/
+summary.csv
+settings.csv
+*.zip
